@@ -1,3 +1,4 @@
 fastapi
-numpy
 uvicorn
+python-multipart
+numpy  # for easy math like average and percentiles
