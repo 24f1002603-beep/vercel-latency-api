@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import json
 import numpy as np
 
 app = FastAPI()
 
-# Enable CORS
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +15,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load telemetry data
+# Explicit preflight support
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    response = JSONResponse(content={})
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+# Load telemetry
 with open("q-vercel-latency.json", "r") as f:
     telemetry = json.load(f)
 
@@ -22,17 +32,14 @@ with open("q-vercel-latency.json", "r") as f:
 @app.post("/")
 def analyze(data: dict):
 
-    requested_regions = data.get("regions", [])
+    regions = data.get("regions", [])
     threshold = data.get("threshold_ms", 180)
 
     result = {}
 
-    for region in requested_regions:
+    for region in regions:
 
-        rows = [
-            r for r in telemetry
-            if r["region"] == region
-        ]
+        rows = [r for r in telemetry if r["region"] == region]
 
         if not rows:
             continue
@@ -44,19 +51,19 @@ def analyze(data: dict):
             "avg_latency": round(float(np.mean(latencies)), 2),
             "p95_latency": round(float(np.percentile(latencies, 95)), 2),
             "avg_uptime": round(float(np.mean(uptimes)), 2),
-            "breaches": sum(
-                1 for x in latencies
-                if x > threshold
-            )
+            "breaches": sum(1 for x in latencies if x > threshold)
         }
 
-    return {
-        "regions": result
-    }
+    response = JSONResponse(content=result)
+
+    # Explicit CORS header
+    response.headers["Access-Control-Allow-Origin"] = "*"
+
+    return response
 
 
 @app.get("/")
 def root():
-    return {
-        "message": "Latency Analytics API Running"
-    }
+    response = JSONResponse(content={"status": "ok"})
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
