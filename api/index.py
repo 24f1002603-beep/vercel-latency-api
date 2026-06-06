@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import json
 import numpy as np
 
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,10 +14,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load telemetry data
+# Explicit OPTIONS handler for CORS preflight
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
 with open("q-vercel-latency.json", "r") as f:
     telemetry = json.load(f)
-
 
 @app.post("/")
 def analyze(data: dict):
@@ -29,18 +39,9 @@ def analyze(data: dict):
 
     for region in regions:
 
-        rows = [
-            r for r in telemetry
-            if r["region"] == region
-        ]
+        rows = [r for r in telemetry if r["region"] == region]
 
         if not rows:
-            result[region] = {
-                "avg_latency": 0,
-                "p95_latency": 0,
-                "avg_uptime": 0,
-                "breaches": 0
-            }
             continue
 
         latencies = [r["latency_ms"] for r in rows]
@@ -50,14 +51,10 @@ def analyze(data: dict):
             "avg_latency": round(float(np.mean(latencies)), 2),
             "p95_latency": round(float(np.percentile(latencies, 95)), 2),
             "avg_uptime": round(float(np.mean(uptimes)), 2),
-            "breaches": sum(
-                1 for x in latencies
-                if x > threshold
-            )
+            "breaches": sum(1 for x in latencies if x > threshold)
         }
 
     return result
-
 
 @app.get("/")
 def root():
