@@ -1,47 +1,68 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json
+import os
 import numpy as np
+from typing import List, Dict
 
 app = FastAPI()
 
+# Enable CORS so dashboards from anywhere can call it
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["*"],  # Any website can call it
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-with open("q-vercel-latency.json", "r") as f:
-    telemetry = json.load(f)
+# Load the sample telemetry data once when the function starts
+# (In real life you'd load from a database, but here we use the file)
+DATA_FILE = "q-vercel-latency.json"
 
-@app.post("/")
-def analyze(data: dict):
+try:
+    with open(DATA_FILE, "r") as f:
+        telemetry_data = json.load(f)
+except:
+    telemetry_data = []  # Empty if file missing
 
-    regions = data.get("regions", [])
-    threshold = data.get("threshold_ms", 180)
-
-    result = {}
-
+@app.post("/analytics")  # This is the POST endpoint
+async def analytics(request: Request):
+    body = await request.json()
+    
+    regions = body.get("regions", [])
+    threshold_ms = body.get("threshold_ms", 180)
+    
+    results = {}
+    
+    # Group data by region
     for region in regions:
-        rows = [r for r in telemetry if r["region"] == region]
-
-        if not rows:
+        region_data = [record for record in telemetry_data if record.get("region") == region]
+        
+        if not region_data:
+            results[region] = {
+                "avg_latency": 0,
+                "p95_latency": 0,
+                "avg_uptime": 0,
+                "breaches": 0
+            }
             continue
-
-        latencies = [r["latency_ms"] for r in rows]
-        uptimes = [r["uptime_pct"] for r in rows]
-
-        result[region] = {
-            "avg_latency": round(float(np.mean(latencies)), 2),
-            "p95_latency": round(float(np.percentile(latencies, 95)), 2),
-            "avg_uptime": round(float(np.mean(uptimes)), 2),
-            "breaches": sum(1 for x in latencies if x > threshold)
+        
+        # Extract numbers
+        latencies = [r.get("latency_ms", 0) for r in region_data]
+        uptimes = [r.get("uptime", 0) for r in region_data]  # assuming uptime % or 0-1
+        
+        # Calculations
+        avg_latency = float(np.mean(latencies)) if latencies else 0
+        p95_latency = float(np.percentile(latencies, 95)) if latencies else 0
+        avg_uptime = float(np.mean(uptimes)) if uptimes else 0
+        breaches = sum(1 for lat in latencies if lat > threshold_ms)
+        
+        results[region] = {
+            "avg_latency": round(avg_latency, 2),
+            "p95_latency": round(p95_latency, 2),
+            "avg_uptime": round(avg_uptime, 2),
+            "breaches": breaches
         }
-
-    return result
-
-@app.get("/")
-def root():
-    return {"status": "ok"}
+    
+    return results
